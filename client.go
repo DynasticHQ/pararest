@@ -88,7 +88,7 @@ func (c *Client) Post(p Payload, endpoint string) (int, string) {
 	return resp.StatusCode(), resp.String()
 }
 
-// signRequest signs the request with the canoical headers before sending it to the host.
+// signRequest signs the request with the canoical headers.
 func (c *Client) signRequest() {
 	var payload string
 	for _, header := range CanonicalHeaders {

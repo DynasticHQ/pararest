@@ -74,7 +74,7 @@ func HandlePost(w http.ResponseWriter, req *http.Request) {
 func validateSignature(req *http.Request) error {
 	var payload string
 	for _, header := range pararest.CanonicalHeaders {
-		payload += fmt.Sprintf("%s:%s", header, req.Header.Get(header))
+		payload += fmt.Sprintf("%s:%s\n", header, req.Header.Get(header))
 	}
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
@@ -89,7 +89,7 @@ func validateSignature(req *http.Request) error {
 	expectedHash := req.Header.Get(pararest.HeaderAuthRequest)
 
 	if testHash != expectedHash {
-		return fmt.Errorf("Did not receive valid %s.\nExpected:-%s-\nReceived:-%s-\n",
+		return fmt.Errorf("Did not receive valid %s.\nExpected: - %s -\nReceived: - %s -\n",
 			pararest.HeaderAuthRequest,
 			testHash,
 			expectedHash)
