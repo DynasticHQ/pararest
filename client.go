@@ -23,15 +23,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"time"
 
 	"gopkg.in/resty.v0"
 )
 
-type Payload interface{}
-
-type Client struct {
+type MinionClient struct {
 	URL       *url.URL
 	SecretKey []byte
 
@@ -57,53 +56,85 @@ var CanonicalHeaders = []string{
 	HeaderTimestamp,
 }
 
-// New creates a RestClient.
-func New(url *url.URL, secretKey []byte) *Client {
-	c := &Client{
-		URL:       url,
-		SecretKey: secretKey,
-		r:         resty.R().SetHeader("Content-Type", "application/json"),
+// New creates a MinionClient to issue API commands.
+// u is the full URL. Example: https://www.example.com/
+func New(u string, key []byte) *MinionClient {
+
+	mc := &MinionClient{
+		SecretKey: key,
+		r:         resty.R().SetHeader("Content-Type", "application/json; charset=utf-8"),
 	}
-	return c
+
+	_url, err := url.Parse(u)
+	if err != nil {
+		// TODO(miguelmoll): Don't like how this silently swallows the error.
+		// It returns a client with out a URL leaving that to the caller. Fix this!
+		return mc
+	}
+
+	mc.URL = _url
+
+	return mc
 }
 
 // Post the payload to the URL and endpoint specified.
-func (c *Client) Post(p Payload, endpoint string) (int, string) {
+func (mc *MinionClient) Post(payload interface{}, endpoint string) ResponsePayload {
 
-	c.URL.Path = path.Join(c.URL.Path, endpoint)
-	c.r.SetHeaders(map[string]string{
+	var response ResponsePayload
+
+	mc.URL.Path = path.Join(mc.URL.Path, endpoint)
+	mc.r.SetHeaders(map[string]string{
 		HeaderTimestamp: time.Now().UTC().Format(time.RFC3339),
-		HeaderHost:      c.URL.Host,
-		HeaderPath:      c.URL.Path,
+		HeaderHost:      mc.URL.Host,
+		HeaderPath:      mc.URL.Path,
 		HeaderMethod:    "POST",
 	})
 
-	c.r.SetBody(p)
-	c.signRequest()
+	mc.r.SetBody(payload)
+	signRequest(mc.r, mc.SecretKey)
 
-	resp, err := c.r.Post(c.URL.String())
+	resp, err := mc.r.Post(mc.URL.String())
 	if err != nil {
-		return http.StatusBadRequest, err.Error()
+		response.Error = err
+		response.StatusCode = http.StatusBadRequest
+		return response
 	}
-	return resp.StatusCode(), resp.String()
+
+	return parseResponse(resp)
 }
 
-// signRequest signs the request with the canoical headers.
-func (c *Client) signRequest() {
-	var payload string
-	for _, header := range CanonicalHeaders {
-		payload += fmt.Sprintf("%s:%s\n", header, c.r.Header.Get(header))
+// Bootstrap kicks off minion registration with the server.
+// Returns a minion secret for the bootstrapping minion.
+func (mc *MinionClient) Bootstrap() BootstrapResponse {
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "Unknown"
 	}
 
-	ps, ok := c.r.Body.(string)
+	payload := map[string]interface{}{
+		"hostname": hostname,
+	}
+
+	return toBootstrapResponse(mc.Post(payload, "/bootstrap"))
+}
+
+// signRequest signs the canoical headers of a request using the secretKey.
+func signRequest(r *resty.Request, secretKey []byte) {
+	var payload string
+	for _, header := range CanonicalHeaders {
+		payload += fmt.Sprintf("%s:%s\n", header, r.Header.Get(header))
+	}
+
+	ps, ok := r.Body.(string)
 	if !ok {
 		// TODO(miguelmoll): Make sure to return and handle errors.
 		return
 	}
 	payload += ps
 
-	mac := hmac.New(sha256.New, c.SecretKey)
+	mac := hmac.New(sha256.New, secretKey)
 	mac.Write([]byte(payload))
 
-	c.r.SetHeader(HeaderAuthRequest, fmt.Sprintf("%x", mac.Sum(nil)))
+	r.SetHeader(HeaderAuthRequest, fmt.Sprintf("%x", mac.Sum(nil)))
 }

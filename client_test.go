@@ -20,11 +20,11 @@ package pararest_test
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -40,35 +40,63 @@ func TestClientPost(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(HandlePost))
 	defer ts.Close()
 
-	//URL, _ := url.Parse("http://www.goti85.com")
-	URL, _ := url.Parse(ts.URL)
-	client := pararest.New(URL, secretKey.Bytes())
-	code, msg := client.Post(testPayload, "/test")
-	if code != http.StatusOK {
-		t.Errorf("POST fail. Expected 200. Got: %d - %s ", code, msg)
+	var endpoints = []struct {
+		url    string
+		status int
+	}{
+		{"https://www.example.com/", http.StatusInternalServerError},
+		{"https://www.fakemadeupexample2415.com/", http.StatusBadRequest},
+		{ts.URL, http.StatusOK},
 	}
+
+	for _, ep := range endpoints {
+		client := pararest.New(ep.url, secretKey.Bytes())
+		resp := client.Post(testPayload, "/test")
+		if resp.StatusCode != ep.status {
+			t.Errorf("POST fail. Expected %d. Got: %d - %s", ep.status, resp.StatusCode, resp.Error)
+		}
+	}
+
 }
 
 func HandlePost(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
 	method := strings.ToUpper(req.Method)
 	if method != "POST" {
 		msg := fmt.Sprintf("Expected method POST, received %v", method)
-		http.Error(w, msg, http.StatusInternalServerError)
+		w.Write(errorResponse(msg, http.StatusBadRequest))
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	method = strings.ToUpper(req.Header.Get(pararest.HeaderMethod))
 	if method != "POST" {
 		msg := fmt.Sprintf("Expected custom header method POST, received %v", method)
-		http.Error(w, msg, http.StatusInternalServerError)
+		w.Write(errorResponse(msg, http.StatusBadRequest))
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	err := validateSignature(req)
 	if err != nil {
 		msg := fmt.Sprintf("Minion signature validation failed: %s", err)
-		http.Error(w, msg, http.StatusUnauthorized)
+		w.Write(errorResponse(msg, http.StatusUnauthorized))
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+
+	fmt.Fprintf(w, `{}`)
+}
+
+func errorResponse(msg string, code int) []byte {
+	body := map[string]interface{}{
+		"error":       msg,
+		"status_code": code,
+	}
+
+	j, _ := json.Marshal(body)
+	return j
+
 }
 
 func validateSignature(req *http.Request) error {
