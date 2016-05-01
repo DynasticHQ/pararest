@@ -20,6 +20,7 @@ package pararest
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -34,7 +35,7 @@ type MinionClient struct {
 	URL       *url.URL
 	SecretKey []byte
 
-	r *resty.Request
+	rc *resty.Client
 }
 
 // Headers
@@ -62,7 +63,7 @@ func New(u string, key []byte) *MinionClient {
 
 	mc := &MinionClient{
 		SecretKey: key,
-		r:         resty.R().SetHeader("Content-Type", "application/json; charset=utf-8"),
+		rc:        resty.New(),
 	}
 
 	_url, err := url.Parse(u)
@@ -74,6 +75,14 @@ func New(u string, key []byte) *MinionClient {
 
 	mc.URL = _url
 
+	// Only JSON is supported at this moment.
+	mc.rc.OnAfterResponse(func(c *resty.Client, resp *resty.Response) error {
+		if resp.Header().Get("Content-Type") != "application/json; charset=utf-8" {
+			return errors.New("Invalid server Content-Type. Needs to be 'application/json; charset=utf-8'.")
+		}
+		return nil // if its success otherwise return error
+	})
+
 	return mc
 }
 
@@ -81,22 +90,31 @@ func New(u string, key []byte) *MinionClient {
 func (mc *MinionClient) Post(payload interface{}, endpoint string) ResponsePayload {
 
 	var response ResponsePayload
+	request := mc.newRequest()
 
 	mc.URL.Path = path.Join(mc.URL.Path, endpoint)
-	mc.r.SetHeaders(map[string]string{
+	request.SetHeaders(map[string]string{
 		HeaderTimestamp: time.Now().UTC().Format(time.RFC3339),
 		HeaderHost:      mc.URL.Host,
 		HeaderPath:      mc.URL.Path,
 		HeaderMethod:    "POST",
 	})
 
-	mc.r.SetBody(payload)
-	signRequest(mc.r, mc.SecretKey)
+	request.SetBody(payload)
+	signRequest(request, mc.SecretKey)
 
-	resp, err := mc.r.Post(mc.URL.String())
+	resp, err := request.Post(mc.URL.String())
 	if err != nil {
+
+		// Ugly hack to check if the response is "empty". Response object can be "not nil" and empty.
+		// Most likely client or network error. e.g dns lookup failed.
+		if resp != nil && resp.String() != "" {
+			response.StatusCode = resp.StatusCode()
+		} else {
+			response.StatusCode = http.StatusBadRequest
+		}
+
 		response.Error = err
-		response.StatusCode = http.StatusBadRequest
 		return response
 	}
 
@@ -117,6 +135,13 @@ func (mc *MinionClient) Bootstrap() BootstrapResponse {
 	}
 
 	return toBootstrapResponse(mc.Post(payload, "/bootstrap"))
+}
+
+func (mc *MinionClient) newRequest() *resty.Request {
+	req := mc.rc.R()
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	return req
 }
 
 // signRequest signs the canoical headers of a request using the secretKey.

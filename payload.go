@@ -19,7 +19,6 @@ package pararest
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -34,20 +33,15 @@ type ResponsePayload struct {
 
 type BootstrapResponse struct {
 	ResponsePayload
-	MinionKey []byte
+	MinionKey     []byte
+	QueueUsername string
+	QueuePassword string
 }
 
 func parseResponse(resp *resty.Response) ResponsePayload {
 	var rp ResponsePayload
 
 	rp.StatusCode = resp.StatusCode()
-
-	// Only JSON is supported because of this.
-	if resp.Header().Get("Content-Type") != "application/json; charset=utf-8" {
-		rp.Error = errors.New("Invalid server Content-Type. Needs to be 'application/json; charset=utf-8'.")
-		rp.StatusCode = http.StatusInternalServerError
-		return rp
-	}
 
 	err := json.Unmarshal(resp.Body(), &rp.Data)
 	if err != nil {

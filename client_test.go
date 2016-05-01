@@ -44,7 +44,7 @@ func TestClientPost(t *testing.T) {
 		url    string
 		status int
 	}{
-		{"https://www.example.com/", http.StatusInternalServerError},
+		{"https://www.example.com/", http.StatusNotFound},
 		{"https://www.fakemadeupexample2415.com/", http.StatusBadRequest},
 		{ts.URL, http.StatusOK},
 	}
@@ -64,24 +64,27 @@ func HandlePost(w http.ResponseWriter, req *http.Request) {
 
 	method := strings.ToUpper(req.Method)
 	if method != "POST" {
+		w.WriteHeader(http.StatusBadRequest)
+
 		msg := fmt.Sprintf("Expected method POST, received %v", method)
 		w.Write(errorResponse(msg, http.StatusBadRequest))
-		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	method = strings.ToUpper(req.Header.Get(pararest.HeaderMethod))
 	if method != "POST" {
+		w.WriteHeader(http.StatusBadRequest)
+
 		msg := fmt.Sprintf("Expected custom header method POST, received %v", method)
 		w.Write(errorResponse(msg, http.StatusBadRequest))
-		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	err := validateSignature(req)
 	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+
 		msg := fmt.Sprintf("Minion signature validation failed: %s", err)
 		w.Write(errorResponse(msg, http.StatusUnauthorized))
-		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
