@@ -149,8 +149,11 @@ func addCredentials(c *Client, r *Request) error {
 		r.RawRequest.SetBasicAuth(c.UserInfo.Username, c.UserInfo.Password)
 		isBasicAuth = true
 	}
-	if isBasicAuth && !strings.HasPrefix(r.URL, "https") {
-		c.Log.Println("WARNING - Using Basic Auth in HTTP mode is not secure.")
+
+	if !c.DisableWarn {
+		if isBasicAuth && !strings.HasPrefix(r.URL, "https") {
+			c.Log.Println("WARNING - Using Basic Auth in HTTP mode is not secure.")
+		}
 	}
 
 	// Token Auth
@@ -301,14 +304,15 @@ func handleRequestBody(c *Client, r *Request) (err error) {
 	if reader, ok := r.Body.(io.Reader); ok {
 		r.bodyBuf = &bytes.Buffer{}
 		r.bodyBuf.ReadFrom(reader)
-	} else if IsJSONType(contentType) && (kind == reflect.Struct || kind == reflect.Map) {
+	} else if b, ok := r.Body.([]byte); ok {
+		bodyBytes = b
+	} else if s, ok := r.Body.(string); ok {
+		bodyBytes = []byte(s)
+	} else if IsJSONType(contentType) &&
+		(kind == reflect.Struct || kind == reflect.Map || kind == reflect.Slice) {
 		bodyBytes, err = json.Marshal(r.Body)
 	} else if IsXMLType(contentType) && (kind == reflect.Struct) {
 		bodyBytes, err = xml.Marshal(r.Body)
-	} else if b, ok := r.Body.(string); ok {
-		bodyBytes = []byte(b)
-	} else if b, ok := r.Body.([]byte); ok {
-		bodyBytes = b
 	}
 
 	if bodyBytes == nil && r.bodyBuf == nil {
